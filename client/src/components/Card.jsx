@@ -1,7 +1,11 @@
-import React from 'react'
+import closedCardSvg from "../assets/svg/closed-card.png"
 
-export default function Card() {
+export function ClosedCard({count, skin}) {
   return (
-    <div>Card</div>
+    <div className="flex">
+      { 
+        [...new Array(count)].map( (i,j) => <img className="w-20 -ml-10 align-middle" key={j} src={closedCardSvg}  /> )
+      }
+    </div>
   )
 }
