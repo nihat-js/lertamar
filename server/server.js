@@ -38,31 +38,17 @@ function shareDeck() {
 
 }
 
-function startGame(id, player = 2, deckSize = 36) {
-  let game = { id: 1, deck: [], deckSize, playerCount, players: [], trump: undefined, middle: [] }
-
-  for (let i = 1; i <= playerCount; i++) {
-    let arr = []
-    for (let i = 0; i < 6; i++) {
-      let random = Math.floor(Math.random() * deck.length)
-      arr.push(deck.splice(random, 1)[0])
-    }
-    game.players.push({ number: i, deck: arr })
-  }
-  game.deck = deck
-}
 
 
 io.on('connection', (socket) => {
   console.log(socket.id + ' user connected');
-
   socket.on('joinLobby', async () => {
     await socket.join('lobby')
-    io.to(socket.id).emit('update', { rooms: rooms.filter(x => x.status == "waiting") })
+    emitRooms()
   })
 
   socket.on('createRoom', async (data) => {
-    console.log('data', data)
+    // console.log('data', data)
     if (![24, 36, 52].includes(data.deckSize)) return false
     if (![2, 3, 4, 5, 6].includes(data.playerCount)) return false
     await socket.leave('lobby') // leave loby
@@ -84,84 +70,101 @@ io.on('connection', (socket) => {
   })
 
   socket.on('joinRoom', async (data) => {
+
     let index = rooms.findIndex(r => r.id === data.id)
     if (index === -1) { console.log('room not found'); return false }
     if (rooms[index].playerCount == rooms[index].joined) { console.log(" Maximum user "); return false }
-    console.log('joining', data.gameId)
+    console.log('joining', data.id)
     await socket.leave('lobby')
     rooms[index].joined++
-    let playerNumber 
-    for (let i=1;i<rooms[index].playerCount;i++){
-      let isExists =  rooms[index].players.some(p => p.number == i)
-      if (isExists) { playerNumber = i ; break}
+    let number
+    for (let i = 1; i <= rooms[index].playerCount; i++) {
+      let isExists = rooms[index].players.some(p => p.number == i)
+      if (!isExists) { number = i; break }
     }
-    console.log('playerNumber', player)
-    let player = { socketId: socket.id, playerNumber }
-    rooms[index].players.push(player)
-    io.to(socket.id).emit('update', { playerNumber: playerNumber, room: rooms[index] })
 
+    console.log('playerNumber', number)
+    rooms[index].players.push({ socketId: socket.id, number })
+    io.to(socket.id).emit('update', { playerNumber: number })
     if (rooms[index].joined == rooms[index].playerCount) {
-      for (let i = 0; i < rooms[index].players.length; i++) {
-        io.to(rooms[index].players[i].socketId).emit('update', { status: "starting" })
-        // rooms[index].players[i].timer = setTimeout(() => {
-        //   rooms[index].players.splice(i, 1)
+      rooms[index].status = "starting"
+      rooms[index].players.forEach(p => {
+        // p.timerFinish = Date.now() + 10000
+        // let a = setTimeout(async () => {
+        //   let playerIndex = rooms[index].players.find(x => x.socketId === socket.id)
         //   rooms[index].joined--
-        //   console.log('user not joined', rooms[index].players)
+        //   rooms[index].status = "waiting"
+        //   rooms[index].players.splice(playerIndex, 1)
+        //   io.to(socket.id).emit('update', { room: {} })
+        //   await socket.join('lobby')
+        //   // rooms[index].players.forEach(x => clearInterval(timer) )
+        //   if (rooms[index].joined == 0) {
+        //     rooms.splice(index, 1)
+        //   }
+        //   emitRooms()
+        //   console.log('obb')
         // }, 10000)
-      }
+        // p.a = {a}
+        // console.log('a', a)
+      })
     }
-    socket.emit('update', { rooms: rooms.filter(r => r.status == "waiting") })
-    console.log(index, io.sockets.adapter.rooms)
+    emitRooms()
+    emitRoom(rooms[index])
   })
 
   socket.on('ready', async (data) => {
     let index = rooms.findIndex(r => r.roomId === data.roomId)
     if (index < 0) return false
-    rooms[index].players.forEach(player => {
-      if (player.socketId == socket.id) {
-        player.status = 'ready'
-        clearInterval(player.timer)
-      }
-    })
+    let playerIndex = rooms[index].players.findIndex(p => p.socketId === socket.id)
+    rooms[index].players[playerIndex].status = "ready"
+    clearInterval(rooms[index].players[playerIndex].timer)
+
+    emitRoom(rooms[index])
+
+
     let areAllReady = rooms[index].players.every(player => player.status == 'ready')
     if (areAllReady) {
-      console.log('started')
+      console.log('all ready')
       rooms[index].status = "started"
       rooms[index].deck = prepareDeck()
       rooms[index].trump = rooms[index].deck.at(-1)
-      rooms[index].attacker = 0
-      rooms[index].defender = 1
+      rooms[index].attacker = 1
+      rooms[index].defender = 2
       for (let i = 0; i < rooms[index].players.length; i++) {
         rooms[index].players[i].deck = rooms[index].deck.splice(0, 6)
-        io.to(rooms[index].players[i].socketId).emit('deck', { deck: rooms[index].players[i].deck, })
-        console.log('w', rooms[index].players[i].deck)
       }
+      emitRoom(rooms[index])
+      // rooms[index].players.forEach((p, j) => {
+      //   io.to(p.socketId).emit('update', { players: filterPlayersData(index, p.number), })
+      // })
     }
   })
 
   socket.on('attackToMiddle', async (data) => {
-    let index = rooms.findIndex(r => r.roomId === data.roomId)
+    let index = rooms.findIndex(r => r.id === data.roomId)
     if (index == -1) return false
-    let playerIndex = rooms[index].players.findIndex(r => r.socketId === socket.id)
-    if (playerIndex == -1) return false
-    let playerNumber = rooms[index].players[playerIndex].playerNumber
-    if (rooms[index].attacker != playerNumber) return false
+    let room = rooms[index]
+    let player = rooms[index].players.find( p => p.socketId == socket.id)
+    if (!player) return false
+    
+    if (room.attacker != player.number) return false
 
-    if (rooms[index].middle.length == 0) {
-      let card = rooms[index].players[playerIndex].deck.splice(data.cardIndex, 1)[0]
-      rooms[index].middle.push({ ...card, slot: 1 })
-      rooms[index].players.forEach(p => io.to(p.socketId).emit('update', { middle: rooms[index].middle }))
+
+    if ( room.middle.length == 0) {
+      let card = player.deck.splice(data.cardIndex, 1)[0]
+      room.middle.push({ ...card, slot: 1 })
+      emitRoom(room)
     } else {
-      let isExists = rooms[index].middle.some(x => x.value == rooms[index].players[playerIndex].deck[data.cardIndex].value)
+      let isExists = room.middle.some(x => x.value == player.deck[data.cardIndex].value)
       if (!isExists) return false
-      let card = rooms[index].players[playerIndex].deck.splice(data.cardIndex, 1)[0]
+      let card = player.deck.splice(data.cardIndex, 1)[0]
       let cardSlot = 0
       rooms[index].middle.forEach(x => { if (x.slot % 2 == 1 && x > cardSlot) { cardSlot = x.slot } })
       cardSlot += 2
-      middle.push({ ...card, cardSlot })
+      room.middle.push({ ...card, cardSlot })
 
     }
-    rooms[index].players.forEach((p, j) => io.to(p.socketId).emit('update', { middle: rooms[index].middle, players: filterPlayersData(index, j) }))
+    // rooms[index].players.forEach((p, j) => io.to(p.socketId).emit('update', { middle: rooms[index].middle, players: filterPlayersData(index, j) }))
 
   })
 
@@ -200,7 +203,7 @@ io.on('connection', (socket) => {
       }
       emitRooms()
     }
-    console.log('disconnected', index, rooms)
+    console.log('disconnected', socket.id, index)
   })
 
 
@@ -209,14 +212,18 @@ io.on('connection', (socket) => {
 
 function emitRooms() {
   io.to('lobby').emit('update', { rooms: rooms.filter(x => x.status == "waiting") })
-
+}
+function emitRoom(room) {
+  // console.log('emitting room', room)
+  room.players.forEach(p => io.to(p.socketId).emit('update', { room: room }))
 }
 
 
-function filterPlayersData(index, playerIndex) {
+function filterPlayersData(index, playerNumber) {
   let data = rooms[index].players.map((i, j) => {
-    i.deckCount = i.deck.length
-    if (playerIndex != j) {
+    console.log(i)
+    i.deckCount = i.deck?.length
+    if (i.number != playerNumber) {
       i.deck = []
     }
     return i

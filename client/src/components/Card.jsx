@@ -1,6 +1,7 @@
 import closedCardSvg from "../assets/svg/closed-card.png"
 
 export function ClosedCard({count, skin}) {
+  console.log('count',count)
   return (
     <div className="flex">
       { 
