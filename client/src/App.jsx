@@ -28,16 +28,8 @@ function App() {
       setRoom(data.room)
     })
     socket.on('disconnect', () => {
-      setPlayerNumber()
       setRoom({})
-    })
-    socket.on('status', (data) => {
-      console.log('status', data)
-      setStatus(data.status)
-    })
-    socket.on('deck', (data) => {
-      setDeck(data.deck)
-      console.log('deck', data)
+      setPlayerNumber()
     })
     socket.on('update', (data) => {
       console.log('update', data)
@@ -55,43 +47,98 @@ function App() {
 
 
   function giveReady() {
-    socket.emit('ready', { roomId: room.roomId })
+    socket.emit('ready', { roomId: room.id })
   }
   function createRoom() {
+    console.log('woo');
     socket.emit('createRoom', { deckSize: 36, playerCount: 2 })
   }
   function joinRoom(id) {
     socket.emit('joinRoom', { id: id })
   }
+  function take() {
+    socket.emit('take', { roomId: room.id, })
+  }
   function getMe() {
     let playerIndex = room.players.findIndex(p => p.number == playerNumber)
     return room.players[playerIndex]
   }
-  function handleDrop(e) {
-    if (room.attacker == playerNumber) {
-      socket.emit('attackToMiddle', { cardIndex: e.dataTransfer.getData('cardIndex'), roomId: room.id })
-    }
-    // if (middle.length == 0 || middle.some(k => k.value == i.value)) {
-    //   socket.emit('attackToMiddle', { card: i, cardIndex: j, roomId: room.roomId, })
-    // }
+  function getDefender() {
+    let defender = room.players.find(x => x.number == room.defender)
+    return defender
   }
+  function attackToMiddle(e) {
+
+    if (room.attacker != playerNumber) { return false }
+    let cardId = e.dataTransfer.getData('cardId')
+    socket.emit('attackToMiddle', { cardId, roomId: room.id })
+  }
+  function defendToMiddle(e, slot) {
+    if (room.defender != playerNumber) {
+      console.log('You are not defending')
+      return false
+    }
+    let cardId = e.dataTransfer.getData('cardId')
+    console.log('defending to middle', cardId, slot)
+    socket.emit('defendToMiddle', { cardId, slot, roomId: room.id })
+  }
+  function done(){
+    console.log('done')
+    socket.emit('done',{roomId : room.id})
+  }
+
   useEffect(() => {
     socket.emit('joinLobby',)
   }, [])
 
+  function renderTakeButton() {
+    let attackerCardCount = 0; let defenderCardCount = 0
+    room.middle.forEach(x => x.slot % 2 == 1 ? attackerCardCount++ : defenderCardCount++)
+    // console.log('cardcounter', attackerCardCount, defenderCardCount)
+    if (room.defender == playerNumber && defenderCardCount < attackerCardCount && getDefender().status != "take"  ) {
+      return < button className="btn py-3 px-4 bg-teal-600 hover:bg-teal-800 rounded-md " onClick={take}> Take </button>
+    }
+  }
+  function renderDoneButton() {
+    console.log('defender',getDefender())
+    if (room.status == "started" && room.attacker == playerNumber && (getDefender().status == "take" || getDefender().status == "done")) {
+      return <button onClick={done} className="py-2 px-3 text-white bg-teal-600 hover:bg-teal-800">  Done </button>
+    }
+  }
+  function renderReadyButton() {
+    if (room.status == "starting" && room.joined == room.playerCount && getMe().status != "ready") {
+      return <button onClick={giveReady} className="py-2 px-3 text-white bg-teal-600 hover:bg-teal-800">  I am ready </button>
+    }
+
+  }
+
+
+
+  function renderSlotPair(a, b) {
+
+    let card1 = room.middle.find(c => c.slot == a)
+    let card2 = room.middle.find(c => c.slot == b)
+
+
+    return <div className={"relative flex  slot-" + a + "-" + b}>
+      {card1 &&
+        <div onDrop={(e) => { defendToMiddle(e, a) }}
+          onDragOver={(e) => e.preventDefault()}
+          className="text-xl border border-blue-400 "> {card1.value}    {card1.shape}
+        </div>}
+
+      {card2 && <div
+        className="text-xl border border-blue-400 absolute left-10 top-10 ">
+        {card2.value}    {card2.shape}
+
+      </div>}
+    </div>
+  }
 
 
   return (
     <div className="App  min-h-screen bg-slate-100 ">
       <div className="container mx-auto py-8" style={{ maxWidth: "1200px" }} >
-        {/* <Card i={{ value: "a", shape: "circle" }} j={1} />
-        <Card i={{ value: "9", shape: "circle" }} j={3} /> */}
-        {/* <div className="middle flex py-4 px-2 border  "  style={{ height: "100px" }}>
-          <div className="slot  flex ">
-            {room.middle?.[0] && <Card i={room.middle?.[0]} />}
-            {room.middle?.[1] && <Card className="ml-4" i={room.middle?.[1]} />}
-          </div>
-        </div> */}
 
         {
           !room.id ? <div className="py-4 px-5 rounded-md  bg-white shadow-md ">
@@ -130,7 +177,6 @@ function App() {
               })}
             </div>
           </div> : <div>
-            {room.status == "starting" && <button className="py-3 px-2 bg-teal-600 hover:bg-teal-800 text-white rounded-md" mt-2 onClick={() => giveReady()} > Give ready   </button>}
             {room.players.map((p, j) => {
               if (p.number == playerNumber) return false
               return <div className="target-player">
@@ -144,17 +190,34 @@ function App() {
                 <div className="deck">
                   {p.deck?.length > 0 && <ClosedCard count={p.deck.length} />}
                 </div>
+                <div className="status"> {room.status == "waiting" && room.joined == room.playerCount && p.status == "ready" ? <span> Ready </span> : ""}  </div>
+                <div className="status"> {p.status} </div>
               </div>
             })}
-            <div className="middle border my-6 rounded-md " style={{ height: "200px" }} onDrop={handleDrop} onDragOver={(e) => e.preventDefault()} >
-              {room.middle.map((i, j) => { return <div className="text-xl border border-blue-400 "> {i.value}    {i.shape}   </div> })}
+            <div className="left-deck">
+              {room.trump && < p> Trump {room.trump.value} {room.trump.shape} </p>}
+              {room.trump && < p> Left Deck {room.deck.length}  </p>}
+            </div>
+            <div className="middle flex gap-12 border my-6 rounded-md " style={{ height: "100px" }} onDrop={attackToMiddle} onDragOver={(e) => e.preventDefault()} >
+              {renderSlotPair(1, 2)}
+              {renderSlotPair(3, 4)}
+              {renderSlotPair(5, 6)}
+              {renderSlotPair(7, 8)}
+              {renderSlotPair(9, 10)}
+              {renderSlotPair(11, 12)}
+
             </div>
             <div className="me flex ">
               <div className="number"> Player {playerNumber} </div>
               <div className="me-deck flex">
                 {playerNumber && getMe().deck?.map((i, j) => <Card i={i} j={j} />)}
               </div>
-              <p className="tip"> { room.attacker == playerNumber ? "Attack time" : room.defender == playerNumber ? "Defend time"  : "" } </p>
+              <p className="tip"> {room.attacker == playerNumber ? "Attack time" : room.defender == playerNumber ? "Defend time" : ""} </p>
+              <div className="actions">
+                {renderReadyButton()}
+                {renderTakeButton()}
+                {renderDoneButton()}
+              </div>
             </div>
 
           </div>
@@ -164,12 +227,13 @@ function App() {
       </div>
     </div>
   )
+
 }
 
 
-function Card({ i, j, className, attackToMidle, defendToMiddle }) {
+function Card({ i, className, }) {
   return (
-    <div draggable={true} onDragStart={(e) => e.dataTransfer.setData("cardIndex", j)}
+    <div draggable={true} onDragStart={(e) => e.dataTransfer.setData("cardId", i.id)}
       className={`text-xl py-3 px-2 w-16 border border-blue-300 flex flex-col items-center  ${className} `}>
       <p> {i.value.toUpperCase()}   </p>
       <p> {i.shape} </p>

@@ -4,39 +4,10 @@ const { Server } = require("socket.io");
 const io = new Server(server, { cors: true });
 const numbers = ['2', '3', "4", "5", "6", "7", "8", "9", '10', 'j', 'q', 'k', 'a']
 const shapes = ['diamond', 'club', 'spade', 'heart']
+const { prepareDeck, canBeatCard } = require("./functions/custom")
 let rooms = []
 
 
-
-function createRoom() {
-
-}
-
-function joinRoom() {
-
-}
-
-function prepareDeck(deckSize = 36) {
-  let deck = []
-  let start = deckSize == 24 ? 7 : deckSize == 36 ? 4 : deckSize == 52 ? 0 : 0
-  for (let i = 0; i < shapes.length; i++) {
-    for (let j = start; j < numbers.length; j++) {
-      deck.push({ value: numbers[j], shape: shapes[i] })
-    }
-  } // full deck
-  for (let i = 0; i < deck.length; i++) {
-    let random = Math.floor(Math.random() * deck.length)
-    let q = deck[i]
-    let t = deck[random]
-    deck[i] = t
-    deck[random] = q
-  } // shuffle
-  return deck
-}
-
-function shareDeck() {
-
-}
 
 
 
@@ -113,81 +84,143 @@ io.on('connection', (socket) => {
   })
 
   socket.on('ready', async (data) => {
-    let index = rooms.findIndex(r => r.roomId === data.roomId)
-    if (index < 0) return false
-    let playerIndex = rooms[index].players.findIndex(p => p.socketId === socket.id)
-    rooms[index].players[playerIndex].status = "ready"
-    clearInterval(rooms[index].players[playerIndex].timer)
+    let room = rooms.find(r => r.id == data.roomId)
+    if (!room) return false
+    let player = room.players.find(p => p.socketId === socket.id)
+    if (!player) return false
 
-    emitRoom(rooms[index])
+    player.status = "ready"
+    clearInterval(player.timer)
+    emitRoom(room)
 
 
-    let areAllReady = rooms[index].players.every(player => player.status == 'ready')
+    let areAllReady = room.players.every(player => player.status == 'ready')
     if (areAllReady) {
       console.log('all ready')
-      rooms[index].status = "started"
-      rooms[index].deck = prepareDeck()
-      rooms[index].trump = rooms[index].deck.at(-1)
-      rooms[index].attacker = 1
-      rooms[index].defender = 2
-      for (let i = 0; i < rooms[index].players.length; i++) {
-        rooms[index].players[i].deck = rooms[index].deck.splice(0, 6)
+      room.status = "started"
+      room.deck = prepareDeck()
+      room.trump = room.deck.at(-1)
+      room.attacker = 1
+      room.defender = 2
+      for (let i = 0; i < room.players.length; i++) {
+        room.players[i].deck = room.deck.splice(0, 6)
       }
-      emitRoom(rooms[index])
-      // rooms[index].players.forEach((p, j) => {
-      //   io.to(p.socketId).emit('update', { players: filterPlayersData(index, p.number), })
-      // })
+      emitRoom(room)
     }
   })
 
   socket.on('attackToMiddle', async (data) => {
-    let index = rooms.findIndex(r => r.id === data.roomId)
-    if (index == -1) return false
-    let room = rooms[index]
-    let player = rooms[index].players.find( p => p.socketId == socket.id)
+    let room = rooms.find(r => r.id == data.roomId)
+    if (!room) return false
+    console.log('attacking', data)
+    let player = room.players.find(p => p.socketId == socket.id)
     if (!player) return false
-    
     if (room.attacker != player.number) return false
+    let cardIndex = player.deck.findIndex(c => c.id == data.cardId)
+    if (cardIndex == -1) return false
 
 
-    if ( room.middle.length == 0) {
-      let card = player.deck.splice(data.cardIndex, 1)[0]
+    if (room.middle.length == 0) {
+      let card = player.deck.splice(cardIndex, 1)[0]
       room.middle.push({ ...card, slot: 1 })
       emitRoom(room)
     } else {
-      let isExists = room.middle.some(x => x.value == player.deck[data.cardIndex].value)
+      let isExists = room.middle.some(x => x.value == player.deck[cardIndex].value)
       if (!isExists) return false
-      let card = player.deck.splice(data.cardIndex, 1)[0]
-      let cardSlot = 0
-      rooms[index].middle.forEach(x => { if (x.slot % 2 == 1 && x > cardSlot) { cardSlot = x.slot } })
-      cardSlot += 2
-      room.middle.push({ ...card, cardSlot })
-
+      console.log('isExists', isExists)
+      let card = player.deck.splice(cardIndex, 1)[0]
+      let slot = 0
+      room.middle.forEach(x => { if (x.slot % 2 == 1 && x.slot > slot) { slot = x.slot } })
+      console.log('slot', slot)
+      slot += 2
+      room.middle.push({ ...card, slot: slot })
+      emitRoom(room)
     }
-    // rooms[index].players.forEach((p, j) => io.to(p.socketId).emit('update', { middle: rooms[index].middle, players: filterPlayersData(index, j) }))
 
   })
 
   socket.on('defendToMiddle', async (data) => {
-    let index = rooms.findIndex(r => r.roomId === data.roomId)
-    if (index == -1) return false
-    let playerIndex = rooms[index].players.findIndex(r => r.socketId === socket.id)
-    if (playerIndex == -1) return false
+    let room = rooms.find(r => r.id == data.roomId)
+    if (!room) return false
+    let player = room.players.find(p => p.socketId == socket.id)
+    if (!player) return false
+    if (room.defender != player.number) return false // check if really defender
+    let cardIndex = player.deck.findIndex(c => c.id == data.cardId)
+    if (cardIndex == -1) return false // check if card exists
+
+    let slot = room.middle.find(r => r.slot % 2 == 1 && r.slot == data.slot)
+    if (!slot) return false // check if slot exists
+
+    let result = canBeatCard(player.deck[cardIndex], slot, room.trump)
+    if (!result) return false // could not beat
+
+    
+
+    let card = player.deck.splice(cardIndex, 1)[0]
+    room.middle.push({ ...card, slot: data.slot + 1 })
+
+    let attackerCardCount = 0; let defenderCardCount = 0
+    room.middle.forEach(x => x.slot % 2 == 1 ? attackerCardCount++ : defenderCardCount++)
+    console.log('carcounter',attackerCardCount,defenderCardCount)
+    if (attackerCardCount == defenderCardCount) {
+      player.status = 'done'
+    }
+
+
+    emitRoom(room)
   })
 
   socket.on('done', async (data) => {
+    let room = rooms.find(r => r.id == data.roomId)
+    if (!room) return false
+    let player = room.players.find(p => p.socketId == socket.id)
+    if (!player) return false
+    if (room.attacker != player.number) return false  // o
+
+    let attackerCardCount = 0; let defenderCardCount = 0
+    room.middle.forEach(x => x.slot % 2 == 1 ? attackerCardCount++ : defenderCardCount++)
+
+    let defender = room.players.find(p => p.number == room.defender)
+    if (defender.status == 'take') {
+      defender.deck.push(...room.middle)
+      room.middle = []
+      room.attacker += 2
+      room.defender += 2
+    } else if (defender.status == "done") {
+      room.middle = []
+      room.attacker += 1
+      room.defender += 1
+    }
+
+    if (room.attacker > room.playerCount) room.attacker -= room.playerCount
+    if (room.defender > room.playerCount) room.defender -= room.playerCount
+    room.players.forEach(p => {
+      p.status = ""
+      if (room.deck.length > 0 && p.deck.length < 6) {
+        p.deck.push(...room.deck.splice(0, 6 - p.deck.length))
+        console.log('adding extra cards', )
+      }
+    })
+
+    emitRoom(room)
+
 
   })
 
   socket.on('take', async (data) => {
-    let index = rooms.findIndex(r => r.roomId === data.roomId)
-    if (index == -1) return false
-    let playerIndex = rooms[index].players.findIndex(r => r.socketId === socket.id)
-    if (playerIndex == -1) return false // all validation
+    let room = rooms.find(r => r.id == data.roomId)
+    if (!room) return false
+    let player = room.players.find(p => p.socketId == socket.id)
+    if (!player) return false
+    if (room.defender != player.number) return false  // only defender can take
 
-    if (rooms.defender != rooms[index].players[playerIndex]) return false
-    if (rooms[index].middle.length == 0) return false
-    // rooms[index].player 
+    let attackerCardCount = 0; let defenderCardCount = 0
+    room.middle.forEach(x => x.slot % 2 == 1 ? attackerCardCount++ : defenderCardCount++)
+    if (attackerCardCount == defenderCardCount) return false // hey you can't take it
+    player.status = "take"
+
+    emitRoom(room)
+
   })
 
 
