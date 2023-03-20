@@ -4,13 +4,10 @@ import { ClosedCard } from "./components/Card";
 import { CountdownCircleTimer } from 'react-countdown-circle-timer'
 
 import cardSvg from "./assets/svg/closed-card.png"
+import Lobby from "./components/Lobby";
 const socket = io("http://localhost:3000");
 function App() {
 
-  const inputDeckCount = useRef()
-  const inputPlayerCount = useRef()
-
-  let [input, setInput] = useState()
   let [room, setRoom] = useState({})
   let [rooms, setRooms] = useState([])
   let [playerNumber, setPlayerNumber] = useState()
@@ -49,15 +46,17 @@ function App() {
   function giveReady() {
     socket.emit('ready', { roomId: room.id })
   }
-  function createRoom() {
-    console.log('woo');
-    socket.emit('createRoom', { deckSize: 36, playerCount: 2 })
+  function createRoom(deckSize,playerCount) {
+    socket.emit('createRoom', { deckSize, playerCount })
   }
   function joinRoom(id) {
-    socket.emit('joinRoom', { id: id })
+    socket.emit('joinRoom', { roomId: id })
   }
   function take() {
     socket.emit('take', { roomId: room.id, })
+  }
+  function leaveRoom(id){
+    socket.emit('leaveRoom', { roomId : id })
   }
   function getMe() {
     let playerIndex = room.players.findIndex(p => p.number == playerNumber)
@@ -82,9 +81,9 @@ function App() {
     console.log('defending to middle', cardId, slot)
     socket.emit('defendToMiddle', { cardId, slot, roomId: room.id })
   }
-  function done(){
+  function done() {
     console.log('done')
-    socket.emit('done',{roomId : room.id})
+    socket.emit('done', { roomId: room.id })
   }
 
   useEffect(() => {
@@ -95,12 +94,12 @@ function App() {
     let attackerCardCount = 0; let defenderCardCount = 0
     room.middle.forEach(x => x.slot % 2 == 1 ? attackerCardCount++ : defenderCardCount++)
     // console.log('cardcounter', attackerCardCount, defenderCardCount)
-    if (room.defender == playerNumber && defenderCardCount < attackerCardCount && getDefender().status != "take"  ) {
+    if (room.defender == playerNumber && defenderCardCount < attackerCardCount && getDefender().status != "take") {
       return < button className="btn py-3 px-4 bg-teal-600 hover:bg-teal-800 rounded-md " onClick={take}> Take </button>
     }
   }
   function renderDoneButton() {
-    console.log('defender',getDefender())
+    console.log('defender', getDefender())
     if (room.status == "started" && room.attacker == playerNumber && (getDefender().status == "take" || getDefender().status == "done")) {
       return <button onClick={done} className="py-2 px-3 text-white bg-teal-600 hover:bg-teal-800">  Done </button>
     }
@@ -141,42 +140,8 @@ function App() {
       <div className="container mx-auto py-8" style={{ maxWidth: "1200px" }} >
 
         {
-          !room.id ? <div className="py-4 px-5 rounded-md  bg-white shadow-md ">
-            <div className="deck-count flex gap-6  items-center">
-              <p className="text-2xl "> Deck Size </p>
-              <div className="group flex gap-2">
-                <input type="radio" name='deckSize' value="24" /> 24
-                <input ref={inputDeckCount} type="radio" name='deckSize' value="36" checked /> 36
-                <input type="radio" name='deckSize' value="52" /> 52
-              </div>
-            </div>
-
-            <div className="player-count  flex gap-6   items-center">
-              <p className="text-2xl"> Player Count  </p>
-              <div className="group flex gap-2">
-                <input type="radio" name='playerCount' value="24" /> 2
-                <input ref={inputPlayerCount} type="radio" name='playerCount' value="36" checked /> 3
-                <input type="radio" name='playerCount' value="52" /> 4
-              </div>
-            </div>
-            <div className="button-wrap mt-3">
-              <button onClick={() => createRoom()} className="bg-blue-600 hover:bg-blue-800 font-semibold text-white  py-2 px-2 rounded-md "> Create Room </button>
-            </div>
-            <div className="rooms-list mt-5">
-              <h2 className="text-2xl font-semibold text-teal-800 "> Rooms List </h2>
-              {rooms.map((i, j) => {
-                return <div className="px-3 py-2 bg-teal-600 mt-4 text-white flex items-center gap-6 rounded-md" >
-                  <div className="deck-count-wrap flex gap-2">
-                    <img className="w-8" src={cardSvg} alt="" />
-                    <span className="decks-count text-xl ">  {i.deckSize}  </span>
-                  </div>
-                  <p className="joined  rounded-md  px-3 py-2" > Joined {i.joined} / {i.playerCount} </p>
-                  <button onClick={() => socket.emit('joinRoom', { id: i.id })}
-                    className=" bg-amber-600 hover:bg-amber-800 text-white rounded-md  px-3 py-2" >  Join </button>
-                </div>
-              })}
-            </div>
-          </div> : <div>
+          !room.id ?  <Lobby createRoom={createRoom}   joinRoom={joinRoom} rooms={rooms} />
+          : <div>
             {room.players.map((p, j) => {
               if (p.number == playerNumber) return false
               return <div className="target-player">

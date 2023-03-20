@@ -19,14 +19,14 @@ io.on('connection', (socket) => {
   })
 
   socket.on('createRoom', async (data) => {
-    // console.log('data', data)
+    console.log('creaating room',  data)
     if (![24, 36, 52].includes(data.deckSize)) return false
     if (![2, 3, 4, 5, 6].includes(data.playerCount)) return false
     await socket.leave('lobby') // leave loby
     let random = Math.random().toString(36).slice(2, 7)
     let obj = {
-      status: "waiting",
       id: random,
+      status: "waiting",
       joined: 1,
       playerCount: data.playerCount,
       deckSize: data.deckSize,
@@ -34,6 +34,8 @@ io.on('connection', (socket) => {
       timer: 15,
       players: [{ socketId: socket.id, number: 1 }],
       middle: [],
+      owner : 1 , 
+      privacy : "public" // private
     }
     rooms.push(obj)
     emitRooms()
@@ -41,25 +43,23 @@ io.on('connection', (socket) => {
   })
 
   socket.on('joinRoom', async (data) => {
-
-    let index = rooms.findIndex(r => r.id === data.id)
-    if (index === -1) { console.log('room not found'); return false }
-    if (rooms[index].playerCount == rooms[index].joined) { console.log(" Maximum user "); return false }
-    console.log('joining', data.id)
+    let room = rooms.find(r => r.id == data.roomId)
+    if (!room) return false // no room
+    if (room.playerCount == room.joined) { console.log(" Maximum user count "); return false } // max user count
+    console.log('joining room ', data.id)
     await socket.leave('lobby')
-    rooms[index].joined++
+    room.joined++
     let number
-    for (let i = 1; i <= rooms[index].playerCount; i++) {
-      let isExists = rooms[index].players.some(p => p.number == i)
+    for (let i = 1; i <= room.playerCount; i++) {
+      let isExists = room.players.some(p => p.number == i)
       if (!isExists) { number = i; break }
     }
 
-    console.log('playerNumber', number)
-    rooms[index].players.push({ socketId: socket.id, number })
+    room.players.push({ socketId: socket.id, number })
     io.to(socket.id).emit('update', { playerNumber: number })
-    if (rooms[index].joined == rooms[index].playerCount) {
-      rooms[index].status = "starting"
-      rooms[index].players.forEach(p => {
+    if (room.joined == room.playerCount) {
+      room.status = "starting"
+      room.players.forEach(p => {
         // p.timerFinish = Date.now() + 10000
         // let a = setTimeout(async () => {
         //   let playerIndex = rooms[index].players.find(x => x.socketId === socket.id)
@@ -80,7 +80,7 @@ io.on('connection', (socket) => {
       })
     }
     emitRooms()
-    emitRoom(rooms[index])
+    emitRoom(room)
   })
 
   socket.on('ready', async (data) => {
